@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HSE DocuMind</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --bg: #1A2B1A; --surface: #2D3B2D; --sidebar: #243324;
+            --accent: #8B7355; --text-pri: #F0EDE8; --text-sec: #A89880;
+            --tab-act: #C4A882; --input: #162216; --border: #3D5C3D;
+        }
+        .light-mode {
+            --bg: #F5F0E8; --surface: #FFFFFF; --sidebar: #EDE8DC;
+            --text-pri: #2D2418; --text-sec: #6B5B45; --input: #FAF7F2;
+            --border: #D4C5B0; --tab-act: #8B7355;
+        }
+        body { background-color: var(--bg); color: var(--text-pri); transition: all 0.3s; }
+        .bg-panel { background-color: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .btn-cta { background-color: var(--accent); color: var(--bg); border-radius: 9999px; padding: 10px 20px; font-weight: bold; cursor: pointer; border: none; }
+        .btn-sec { border: 2px solid var(--accent); color: var(--accent); background: transparent; border-radius: 9999px; padding: 8px 16px; font-size: 14px; cursor: pointer; }
+        input { background-color: var(--input); border: 2px solid var(--border); border-radius: 9999px; color: var(--text-pri); }
+        input:focus { border-color: var(--accent); outline: none; }
+        .tab-btn { color: var(--text-sec); transition: 0.3s; font-size: 15px; }
+        .tab-btn.active { color: var(--tab-act); font-weight: 800; }
+        #tab-slider { position: absolute; bottom: 0; height: 3px; background: var(--tab-act); transition: 0.3s; }
+        .status-dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+        .del-btn { background: #F87171; color: white; width: 18px; height: 18px; border-radius: 50%; font-size: 10px; line-height: 18px; text-align: center; cursor: pointer; margin-left: auto; flex-shrink: 0; }
+        #chat-btn { position: fixed; bottom: 24px; right: 24px; width: 56px; height: 56px; background-color: #C4A882; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        #chat-drawer { position: fixed; right: 0; top: 0; height: 100vh; width: 340px; background-color: var(--sidebar); border-left: 1px solid var(--border); z-index: 999; display: flex; flex-direction: column; padding: 16px; box-sizing: border-box; transition: transform 0.3s ease; transform: translateX(340px); }
+        #chat-drawer.open { transform: translateX(0); }
+        select { background-color: var(--input); border: 2px solid var(--border); border-radius: 12px; color: var(--text-pri); padding: 10px 16px; font-size: 13px; cursor: pointer; width: 100%; margin-bottom: 12px; }
+        select option, select optgroup { background: #1A2B1A; }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+
+<aside id="sidebar" class="w-64 p-4 flex flex-col border-r border-[var(--border)] bg-[var(--sidebar)]">
+    <h1 class="text-xl font-bold flex items-center justify-center gap-2 mb-1">HSE DocuMind</h1>
+    <p class="text-[11px] text-center text-[var(--text-sec)] mb-2 uppercase tracking-widest">AI-POWERED HSE DOCUMENT ANALYSIS</p>
+    <hr class="border-[var(--border)] mb-6">
+    <div class="flex items-center gap-2 mb-4">
+        <input id="apiKey" type="password" placeholder="API Key" class="w-full p-3" oninput="checkKey()">
+        <div id="statusDot" class="status-dot bg-red-400 text-red-400"></div>
+    </div>
+    <input type="file" id="pdfUpload" multiple class="hidden" accept="application/pdf">
+    <button onclick="document.getElementById('pdfUpload').click()" class="btn-cta w-full p-3 mb-4 font-bold">Upload PDFs</button>
+    <div id="fileList" class="flex-grow overflow-y-auto space-y-2 text-[var(--text-pri)]"></div>
+    <div id="uploadStatus" class="text-[10px] text-[var(--text-sec)] text-center mt-2"></div>
+    <button onclick="document.body.classList.toggle('light-mode')" class="btn-sec p-2 mt-4">Toggle Theme</button>
+</aside>
+
+<main class="flex-grow flex flex-col bg-[var(--bg)]">
+    <nav class="flex border-b border-[var(--border)] relative" id="tab-nav">
+        <button onclick="showTab('doc', this)" class="tab-btn active px-8 py-4">Document View</button>
+        <button onclick="showTab('graph', this)" class="tab-btn px-8 py-4">Knowledge Graph</button>
+        <button onclick="showTab('comp', this)" class="tab-btn px-8 py-4">Compliance</button>
+        <button onclick="showTab('pres', this)" class="tab-btn px-8 py-4">Presentation</button>
+        <div id="tab-slider"></div>
+    </nav>
+    <section id="content" class="flex-grow p-6 overflow-auto">
+
+        <!-- TAB 1: Document View -->
+        <div id="tab-doc" class="tab-content">
+            <div id="pdfContainer" class="flex flex-col items-center">
+                <div id="uploadMsg" class="text-[var(--text-sec)] mt-20">Upload a PDF from the sidebar to begin</div>
+                <canvas id="pdfCanvas" class="w-full hidden"></canvas>
+                <div id="pdfControls" class="hidden flex items-center gap-4 mt-4">
+                    <button onclick="changePage(-1)" class="btn-sec">Previous</button>
+                    <span id="pageCounter" class="text-[var(--text-sec)]">Page 0 of 0</span>
+                    <button onclick="changePage(1)" class="btn-sec">Next</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: Knowledge Graph -->
+        <div id="tab-graph" class="tab-content hidden bg-panel">
+            <p style="color:#A89880; font-size:13px; margin-bottom:12px;">Select documents in the sidebar then click Generate Knowledge Graph</p>
+            <button id="genGraphBtn" style="background:#8B7355; color:#F0EDE8; border-radius:9999px; padding:10px 24px; font-weight:bold; border:none; cursor:pointer; margin-bottom:16px;">Generate Knowledge Graph</button>
+            <div id="graphStatus" style="color:#A89880; font-size:13px; margin-bottom:8px;"></div>
+            <div id="graphResult"></div>
+            <div id="graphLegend"></div>
+            <button id="dlGraphBtn" style="border:2px solid #8B7355; color:#8B7355; background:transparent; border-radius:9999px; padding:8px 20px; cursor:pointer; margin-top:12px;">Download Graph as PNG</button>
+        </div>
+
+        <!-- TAB 3: Compliance -->
+        <div id="tab-comp" class="tab-content hidden bg-panel">
+            <p style="color:#A89880; font-size:13px; margin-bottom:12px;">Select a standard then click Run Compliance Check</p>
+            <select id="compStandard">
+                <option value="" disabled selected>Select a Compliance Standard</option>
+                <optgroup label="ISO STANDARDS">
+                    <option value="ISO 45001:2018 Occupational Health Safety">ISO 45001:2018 Occupational Health Safety</option>
+                    <option value="ISO 14001:2015 Environmental Management">ISO 14001:2015 Environmental Management</option>
+                    <option value="ISO 31000:2018 Risk Management">ISO 31000:2018 Risk Management</option>
+                </optgroup>
+                <optgroup label="OSHA USA">
+                    <option value="OSHA 29 CFR 1910 General Industry">OSHA 29 CFR 1910 General Industry</option>
+                    <option value="OSHA 29 CFR 1926 Construction">OSHA 29 CFR 1926 Construction</option>
+                    <option value="OSHA PSM 1910.119">OSHA PSM 1910.119</option>
+                    <option value="OSHA HazCom 1910.1200">OSHA HazCom 1910.1200</option>
+                </optgroup>
+                <optgroup label="OIL AND GAS">
+                    <option value="IOGP Life-Saving Rules">IOGP Life-Saving Rules</option>
+                    <option value="API RP 75 Offshore Safety">API RP 75 Offshore Safety</option>
+                    <option value="NORSOK S-006">NORSOK S-006</option>
+                </optgroup>
+                <optgroup label="MIDDLE EAST">
+                    <option value="UAE Federal Law No 8 of 1980">UAE Federal Law No 8 of 1980</option>
+                    <option value="UAE OSHAD SF Abu Dhabi">UAE OSHAD SF Abu Dhabi</option>
+                    <option value="Saudi Arabia SASO GSO 45001">Saudi Arabia SASO GSO 45001</option>
+                    <option value="Qatar QCDD Fire Safety">Qatar QCDD Fire Safety</option>
+                    <option value="Kuwait MEW Safety">Kuwait MEW Safety</option>
+                    <option value="Oman Royal Decree 286">Oman Royal Decree 286</option>
+                    <option value="Bahrain Decree No 23 1976">Bahrain Decree No 23 1976</option>
+                </optgroup>
+                <optgroup label="EUROPE">
+                    <option value="EU Directive 89/391/EEC">EU Directive 89/391/EEC</option>
+                    <option value="UK HSE Management Regulations">UK HSE Management Regulations</option>
+                    <option value="UK COSHH Regulations 2002">UK COSHH Regulations 2002</option>
+                </optgroup>
+                <optgroup label="ASIA PACIFIC">
+                    <option value="Australia WHS Act 2011">Australia WHS Act 2011</option>
+                    <option value="Singapore WSH Act 2006">Singapore WSH Act 2006</option>
+                    <option value="India Factories Act 1948">India Factories Act 1948</option>
+                    <option value="Malaysia OSHA 1994">Malaysia OSHA 1994</option>
+                </optgroup>
+                <optgroup label="AFRICA AND AMERICAS">
+                    <option value="South Africa OHS Act 85 1993">South Africa OHS Act 85 1993</option>
+                    <option value="Nigeria OSHA DPR Safety">Nigeria OSHA DPR Safety</option>
+                    <option value="Canada CSA Z45001">Canada CSA Z45001</option>
+                    <option value="Brazil NR Normas Regulamentadoras">Brazil NR Normas Regulamentadoras</option>
+                </optgroup>
+            </select>
+            <button id="runCompBtn" style="background:#8B7355; color:#F0EDE8; border-radius:9999px; padding:10px 24px; font-weight:bold; border:none; cursor:pointer; margin-bottom:16px;">Run Compliance Check</button>
+            <div id="complianceResult"></div>
+        </div>
+
+        <!-- TAB 4: Presentation -->
+        <div id="tab-pres" class="tab-content hidden bg-panel">
+            <p style="color:#A89880; font-size:13px; margin-bottom:12px;">Select documents then click Generate Presentation</p>
+            <button id="genPresBtn" style="background:#8B7355; color:#F0EDE8; border-radius:9999px; padding:10px 24px; font-weight:bold; border:none; cursor:pointer; margin-bottom:16px;">Generate Presentation</button>
+            <div id="presStatus" style="color:#A89880; font-size:13px; margin-bottom:8px;"></div>
+            <div id="presContainer" style="display:none; width:100%;">
+                <div id="slideDisplay" style="width:100%; min-height:400px; border-radius:16px; overflow:hidden;"></div>
+                <div id="slideNav" style="display:flex; align-items:center; justify-content:center; gap:16px; margin-top:16px;">
+                    <button id="prevSlide" style="border:2px solid #8B7355; color:#8B7355; background:transparent; border-radius:9999px; padding:8px 20px; cursor:pointer;">Previous Slide</button>
+                    <span id="slideCounter" style="color:#A89880; font-size:13px;"></span>
+                    <button id="nextSlide" style="border:2px solid #8B7355; color:#8B7355; background:transparent; border-radius:9999px; padding:8px 20px; cursor:pointer;">Next Slide</button>
+                </div>
+                <div style="display:flex; gap:12px; margin-top:12px;">
+                    <button id="dlPresHTML" style="border:2px solid #8B7355; color:#8B7355; background:transparent; border-radius:9999px; padding:8px 20px; cursor:pointer;">Download as HTML</button>
+                    <button id="dlPresPDF" style="border:2px solid #8B7355; color:#8B7355; background:transparent; border-radius:9999px; padding:8px 20px; cursor:pointer;">Download as PDF</button>
+                </div>
+            </div>
+        </div>
+
+    </section>
+</main>
+
+<div id="chat-btn" onclick="toggleChat()">💬</div>
+<div id="chat-drawer">
+    <div class="flex justify-between items-center mb-4">
+        <span class="font-bold text-[16px]">Chat with Your HSE Documents</span>
+        <div class="bg-[#F87171] text-white w-[24px] h-[24px] rounded-full text-center text-[12px] leading-[24px] cursor-pointer" onclick="toggleChat()">X</div>
+    </div>
+    <div id="chatLog" class="flex-grow overflow-y-auto space-y-4 mb-4"></div>
+    <input id="chatInput" type="text" placeholder="Ask a question about your documents" class="w-full p-3" onkeypress="handleChat(event)">
+</div>
+
+<script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    window.uploadedDocs = [];
+    var activePdf = null, activePage = 1;
+    window._presSlides = []; window._currentSlide = 0;
+
+    var GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=';
+
+    function getKey() {
+        return document.getElementById('apiKey').value.trim();
+    }
+
+    function getCheckedDocs() {
+        return window.uploadedDocs.filter(function(_, i) {
+            var cb = document.getElementById('check-' + i);
+            return cb && cb.checked;
+        });
+    }
+
+    function stripFences(raw) {
+        return raw.replace(/^```[a-zA-Z]*\n?/gm, '').replace(/^```$/gm, '').trim();
+    }
+
+    function callGemini(prompt) {
+        var key = getKey();
+        return fetch(GEMINI_ENDPOINT + key, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] })
+        }).then(function(response) {
+            return response.json();
+        }).then(function(data) {
+            if (!data.candidates || data.candidates.length === 0) {
+                throw new Error('API returned no candidates. Response: ' + JSON.stringify(data));
+            }
+            return data.candidates[0].content.parts[0].text;
+        });
+    }
+
+    window.showTab = function(id, el) {
+        document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+        el.classList.add('active');
+        var slider = document.getElementById('tab-slider');
+        slider.style.width = el.offsetWidth + 'px';
+        slider.style.left = el.offsetLeft + 'px';
+        document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.add('hidden'); });
+        document.getElementById('tab-' + id).classList.remove('hidden');
+    };
+
+    window.checkKey = function() {
+        var k = document.getElementById('apiKey').value;
+        document.getElementById('statusDot').className = 'status-dot ' +
+            (k.length > 20 ? 'bg-green-400 text-green-400' : 'bg-red-400 text-red-400');
+    };
+
+    function toggleChat() {
+        document.getElementById('chat-drawer').classList.toggle('open');
+    }
+
+    function handleChat(e) {
+        if (e.key !== 'Enter') return;
+        var input = document.getElementById('chatInput');
+        var chatLog = document.getElementById('chatLog');
+        var key = getKey();
+        if (!key) {
+            chatLog.innerHTML += '<div class="p-2 text-red-400 text-sm">Please enter your Gemini API key.</div>';
+            return;
+        }
+        var checked = getCheckedDocs();
+        if (checked.length === 0) {
+            chatLog.innerHTML += '<div class="p-2 text-red-400 text-sm">Please select at least one document from the sidebar.</div>';
+            return;
+        }
+        var userMsg = input.value.trim();
+        if (!userMsg) return;
+        input.value = '';
+        var userDiv = document.createElement('div');
+        userDiv.className = 'p-2 rounded-lg text-sm ml-auto w-fit';
+        userDiv.style.cssText = 'background:#8B7355;color:#1A2B1A;max-width:90%;';
+        userDiv.textContent = userMsg;
+        chatLog.appendChild(userDiv);
+        var typingDiv = document.createElement('div');
+        typingDiv.className = 'p-2 text-sm italic';
+        typingDiv.style.color = '#A89880';
+        typingDiv.textContent = '...';
+        chatLog.appendChild(typingDiv);
+        chatLog.scrollTop = chatLog.scrollHeight;
+        var docContext = checked.map(function(d) { return 'Document: ' + d.name + '\nContent: ' + d.text; }).join('\n\n');
+        var systemPrompt = 'You are an expert HSE analyst and document reviewer with deep knowledge of oil and gas safety, ISO 45001, OSHA standards, and UAE regulations. Answer only from the documents provided. End your answer with a References section citing the exact section where you found the information. If not found in the documents, say so and answer from general HSE knowledge.';
+        callGemini(systemPrompt + '\n\n' + docContext + '\n\nQuestion: ' + userMsg).then(function(reply) {
+            if (typingDiv.parentNode) typingDiv.parentNode.removeChild(typingDiv);
+            var replyDiv = document.createElement('div');
+            replyDiv.className = 'p-2 rounded-lg text-sm w-fit';
+            replyDiv.style.cssText = 'background:var(--surface);color:var(--text-pri);white-space:pre-wrap;max-width:90%;';
+            replyDiv.textContent = reply;
+            chatLog.appendChild(replyDiv);
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }).catch(function(err) {
+            if (typingDiv.parentNode) typingDiv.parentNode.removeChild(typingDiv);
+            var errDiv = document.createElement('div');
+            errDiv.className = 'p-2 text-sm';
+            errDiv.style.color = '#F87171';
+            errDiv.textContent = 'Error: ' + err.message;
+            chatLog.appendChild(errDiv);
+        });
+    }
+
+    document.getElementById('pdfUpload').onchange = function(e) {
+        var statusEl = document.getElementById('uploadStatus');
+        var files = Array.from(e.target.files);
+        var index = 0;
+        function processNext() {
+            if (index >= files.length) {
+                statusEl.textContent = window.uploadedDocs.length + ' document(s) ready.';
+                e.target.value = '';
+                return;
+            }
+            var file = files[index];
+            index++;
+            statusEl.textContent = 'Reading ' + file.name + '...';
+            file.arrayBuffer().then(function(ab) {
+                return pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
+            }).then(function(pdf) {
+                var pages = [];
+                for (var p = 1; p <= pdf.numPages; p++) {
+                    pages.push(p);
+                }
+                var fullText = '';
+                var pageIndex = 0;
+                function nextPage() {
+                    if (pageIndex >= pages.length) {
+                        window.uploadedDocs.push({ name: file.name, pdf: pdf, text: fullText });
+                        renderFileList();
+                        processNext();
+                        return;
+                    }
+                    var pageNum = pages[pageIndex];
+                    pageIndex++;
+                    pdf.getPage(pageNum).then(function(page) {
+                        return page.getTextContent();
+                    }).then(function(content) {
+                        fullText += content.items.map(function(item) { return item.str; }).join(' ') + '\n';
+                        nextPage();
+                    });
+                }
+                nextPage();
+            }).catch(function(err) {
+                statusEl.textContent = 'Error reading ' + file.name;
+                console.error(err);
+                processNext();
+            });
+        }
+        processNext();
+    };
+
+    function renderFileList() {
+        document.getElementById('fileList').innerHTML = window.uploadedDocs.map(function(doc, idx) {
+            return '<div class="flex items-center gap-2 text-sm">' +
+                '<input type="checkbox" checked id="check-' + idx + '">' +
+                '<span class="cursor-pointer truncate flex-grow" onclick="loadPdf(' + idx + ')" title="' + doc.name + '">' + doc.name + '</span>' +
+                '<div class="del-btn" onclick="deleteFile(' + idx + ', event)">X</div>' +
+                '</div>';
+        }).join('');
+    }
+
+    window.deleteFile = function(idx, event) {
+        event.stopPropagation();
+        if (activePdf === window.uploadedDocs[idx].pdf) {
+            activePdf = null;
+            document.getElementById('pdfCanvas').classList.add('hidden');
+            document.getElementById('pdfControls').classList.add('hidden');
+            document.getElementById('uploadMsg').classList.remove('hidden');
+        }
+        window.uploadedDocs.splice(idx, 1);
+        renderFileList();
+    };
+
+    window.loadPdf = function(idx) {
+        activePdf = window.uploadedDocs[idx].pdf;
+        activePage = 1;
+        document.getElementById('uploadMsg').classList.add('hidden');
+        document.getElementById('pdfCanvas').classList.remove('hidden');
+        document.getElementById('pdfControls').classList.remove('hidden');
+        renderPage();
+    };
+
+    function renderPage() {
+        if (!activePdf) return;
+        activePdf.getPage(activePage).then(function(page) {
+            var canvas = document.getElementById('pdfCanvas');
+            var ctx = canvas.getContext('2d');
+            var viewport = page.getViewport({ scale: 1.0 });
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+            page.render({ canvasContext: ctx, viewport: viewport });
+            document.getElementById('pageCounter').textContent = 'Page ' + activePage + ' of ' + activePdf.numPages;
+        });
+    }
+
+    window.changePage = function(delta) {
+        if (!activePdf) return;
+        var next = activePage + delta;
+        if (next >= 1 && next <= activePdf.numPages) { activePage = next; renderPage(); }
+    };
+
+    document.getElementById('genGraphBtn').addEventListener('click', function() {
+        var resultDiv = document.getElementById('graphResult');
+        var legendDiv = document.getElementById('graphLegend');
+        var statusEl  = document.getElementById('graphStatus');
+        if (!getKey() || getKey().length < 10) { statusEl.textContent = 'Please enter your Gemini API key.'; return; }
+        var selected = getCheckedDocs();
+        if (selected.length === 0) { statusEl.textContent = 'Please select at least one document from the sidebar.'; return; }
+        var fullText = selected.map(function(d) { return d.text; }).join(' ').substring(0, 12000);
+        statusEl.textContent = 'Analyzing document and building graph...';
+        resultDiv.innerHTML = '';
+        legendDiv.innerHTML = '';
+        var prompt = 'Analyze this HSE document and return ONLY a raw JSON object with no markdown and no backticks. The object has two arrays. Array named nodes: each node has id (integer starting at 1), label (string max 3 words), type (exactly one of: Hazard, Control, Regulation, Equipment, Process, Person). Array named edges: each edge has source (integer), target (integer), label (string max 2 words). Return maximum 15 nodes and 18 edges based on actual document content. Document: ' + fullText;
+        callGemini(prompt).then(function(raw) {
+            var clean = stripFences(raw);
+            var match = clean.match(/\{[\s\S]*\}/);
+            if (match) clean = match[0];
+            var graph = JSON.parse(clean);
+            var nodeColors = { Hazard:'#F87171', Control:'#4ADE80', Regulation:'#60A5FA', Person:'#FBBF24', Equipment:'#A78BFA', Process:'#2DD4BF' };
+            var W = 700, H = 500, cx = W/2, cy = H/2, r = 190;
+            var positions = {};
+            graph.nodes.forEach(function(n, i) {
+                var angle = (2 * Math.PI * i) / graph.nodes.length;
+                positions[n.id] = { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+            });
+            var svgNS = 'http://www.w3.org/2000/svg';
+            var parts = ['<svg width="100%" height="500" viewBox="0 0 ' + W + ' ' + H + '" xmlns="' + svgNS + '">'];
+            graph.edges.forEach(function(e) {
+                var s = positions[e.source], t = positions[e.target];
+                if (!s || !t) return;
+                var mx = (s.x + t.x) / 2, my = (s.y + t.y) / 2;
+                parts.push('<line x1="' + s.x + '" y1="' + s.y + '" x2="' + t.x + '" y2="' + t.y + '" stroke="#3D5C3D" stroke-width="1.5"/>');
+                parts.push('<text x="' + mx + '" y="' + my + '" fill="#A89880" font-size="9" text-anchor="middle">' + (e.label || '') + '</text>');
+            });
+            graph.nodes.forEach(function(n) {
+                var p = positions[n.id];
+                var c = nodeColors[n.type] || '#A89880';
+                parts.push('<circle cx="' + p.x + '" cy="' + p.y + '" r="30" fill="' + c + '" opacity="0.9"/>');
+                parts.push('<text x="' + p.x + '" y="' + (p.y + 4) + '" fill="white" font-size="9" text-anchor="middle" font-weight="bold">' + n.label.substring(0, 14) + '</text>');
+            });
+            parts.push('</svg>');
+            resultDiv.innerHTML = parts.join('');
+            var types = ['Hazard','Control','Regulation','Equipment','Process','Person'];
+            legendDiv.innerHTML = '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;">' +
+                types.map(function(t) {
+                    return '<div style="display:flex;align-items:center;gap:6px;"><div style="width:12px;height:12px;border-radius:50%;background:' + nodeColors[t] + '"></div><span style="color:#A89880;font-size:12px;">' + t + '</span></div>';
+                }).join('') + '</div>';
+            statusEl.textContent = '';
+        }).catch(function(err) {
+            statusEl.textContent = 'Could not build graph. Error: ' + err.message;
+            console.error(err);
+        });
+    });
+
+    document.getElementById('dlGraphBtn').addEventListener('click', function() {
+        var svg = document.querySelector('#graphResult svg');
+        if (!svg) { alert('Generate a graph first.'); return; }
+        var data = new XMLSerializer().serializeToString(svg);
+        var canvas = document.createElement('canvas');
+        canvas.width = 700; canvas.height = 500;
+        var ctx = canvas.getContext('2d');
+        var img = new Image();
+        img.onload = function() {
+            ctx.fillStyle = '#1A2B1A';
+            ctx.fillRect(0, 0, 700, 500);
+            ctx.drawImage(img, 0, 0);
+            var a = document.createElement('a');
+            a.download = 'HSE-Knowledge-Graph.png';
+            a.href = canvas.toDataURL('image/png');
+            a.click();
+        };
+        img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(data)));
+    });
+
+    document.getElementById('runCompBtn').addEventListener('click', function() {
+        var standard  = document.getElementById('compStandard').value;
+        var resultDiv = document.getElementById('complianceResult');
+        if (!standard) { resultDiv.innerHTML = '<p style="color:#F87171">Please select a compliance standard.</p>'; return; }
+        if (!getKey() || getKey().length < 10) { resultDiv.innerHTML = '<p style="color:#F87171">Please enter your Gemini API key.</p>'; return; }
+        var selected = getCheckedDocs();
+        if (selected.length === 0) { resultDiv.innerHTML = '<p style="color:#F87171">Please select at least one document from the sidebar.</p>'; return; }
+        var docText = selected.map(function(d) { return 'Document: ' + d.name + '\n\n' + d.text; }).join('\n\n').substring(0, 14000);
+        resultDiv.innerHTML = '<p style="color:#A89880">Analyzing against ' + standard + ', please wait...</p>';
+        var prompt = 'You are a senior HSE compliance auditor. Read this document and assess how well it meets ' + standard + '. Return ONLY a raw JSON array with no markdown and no backticks. Each item has exactly five fields: clause (string), requirement (string max 12 words), status (exactly one of: Covered, Partial, Missing), riskLevel (exactly one of: High, Medium, Low), remarks (one sentence). Return between 12 and 15 items based on actual document content. Document:\n' + docText;
+        callGemini(prompt).then(function(raw) {
+            var clean = stripFences(raw);
+            var match = clean.match(/\[\s*\{[\s\S]*\}\s*\]/);
+            if (match) clean = match[0];
+            var items = JSON.parse(clean);
+            window._compData = items;
+            var sColors = { Covered: 'background:#1A4A1A;color:#4ADE80', Partial: 'background:#4A3A00;color:#FBBF24', Missing: 'background:#4A1A1A;color:#F87171' };
+            var rColors = { High: 'color:#F87171', Medium: 'color:#FBBF24', Low: 'color:#4ADE80' };
+            var covered = items.filter(function(i) { return i.status === 'Covered'; }).length;
+            var partial = items.filter(function(i) { return i.status === 'Partial'; }).length;
+            var missing = items.filter(function(i) { return i.status === 'Missing'; }).length;
+            var pct = Math.round((covered + partial * 0.5) / items.length * 100);
+            var html = '<div style="margin-bottom:16px;padding:16px;background:#1A2B1A;border-radius:12px;border:1px solid #3D5C3D;">';
+            html += '<div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:8px;">';
+            html += '<span style="color:#4ADE80;font-size:13px;">Covered: ' + covered + '</span>';
+            html += '<span style="color:#FBBF24;font-size:13px;">Partial: ' + partial + '</span>';
+            html += '<span style="color:#F87171;font-size:13px;">Missing: ' + missing + '</span>';
+            html += '<span style="color:#C4A882;font-size:13px;font-weight:bold;">Score: ' + pct + '%</span></div>';
+            html += '<div style="background:#3D5C3D;border-radius:9999px;height:8px;"><div style="background:#4ADE80;width:' + pct + '%;height:8px;border-radius:9999px;"></div></div></div>';
+            html += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">';
+            html += '<tr style="background:#162216;"><th style="padding:10px;text-align:left;color:#C4A882;">Clause</th><th style="padding:10px;text-align:left;color:#C4A882;">Requirement</th><th style="padding:10px;text-align:left;color:#C4A882;">Status</th><th style="padding:10px;text-align:left;color:#C4A882;">Risk</th><th style="padding:10px;text-align:left;color:#C4A882;">Remarks</th></tr>';
+            items.forEach(function(item, i) {
+                var bg = i % 2 === 0 ? '#2D3B2D' : '#1A2B1A';
+                html += '<tr style="background:' + bg + ';">';
+                html += '<td style="padding:8px;border-bottom:1px solid #3D5C3D;color:#F0EDE8;font-weight:bold;">' + item.clause + '</td>';
+                html += '<td style="padding:8px;border-bottom:1px solid #3D5C3D;color:#F0EDE8;">' + item.requirement + '</td>';
+                html += '<td style="padding:8px;border-bottom:1px solid #3D5C3D;"><span style="' + (sColors[item.status] || 'color:#F0EDE8') + ';padding:3px 8px;border-radius:9999px;font-size:11px;font-weight:bold;">' + item.status + '</span></td>';
+                html += '<td style="padding:8px;border-bottom:1px solid #3D5C3D;' + (rColors[item.riskLevel] || '') + ';font-weight:bold;">' + item.riskLevel + '</td>';
+                html += '<td style="padding:8px;border-bottom:1px solid #3D5C3D;color:#A89880;">' + item.remarks + '</td>';
+                html += '</tr>';
+            });
+            html += '</table></div>';
+            html += '<div style="margin-top:12px;display:flex;gap:12px;flex-wrap:wrap;">';
+            html += '<button onclick="printComplianceReport()" style="border:2px solid #C4A882;color:#C4A882;background:transparent;border-radius:9999px;padding:8px 20px;cursor:pointer;">Print as PDF</button>';
+            html += '<button onclick="downloadCompCSV()" style="border:2px solid #8B7355;color:#8B7355;background:transparent;border-radius:9999px;padding:8px 20px;cursor:pointer;">Download CSV</button>';
+            html += '</div>';
+            resultDiv.innerHTML = html;
+        }).catch(function(err) {
+            resultDiv.innerHTML = '<p style="color:#F87171">Compliance check failed: ' + err.message + '</p>';
+            console.error(err);
+        });
+    });
+
+    window.downloadCompCSV = function() {
+        if (!window._compData || !window._compData.length) { alert('Run a compliance check first.'); return; }
+        var rows = [['Clause','Requirement','Status','Risk Level','Remarks']];
+        window._compData.forEach(function(i) {
+            rows.push([i.clause, i.requirement, i.status, i.riskLevel, i.remarks].map(function(v) {
+                return '"' + String(v).replace(/"/g, '""') + '"';
+            }));
+        });
+        var csv = rows.map(function(r) { return r.join(','); }).join('\n');
+        var a = document.createElement('a');
+        a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+        a.download = 'HSE-Compliance-Report.csv';
+        a.click();
+    };
+
+    window.printComplianceReport = function() {
+        var content = document.getElementById('complianceResult').innerHTML;
+        var w = window.open('', '_blank');
+        w.document.write('<!DOCTYPE html><html><head><title>HSE Compliance Report</title><style>body{font-family:system-ui;background:#1A2B1A;color:#F0EDE8;padding:32px;-webkit-print-color-adjust:exact;print-color-adjust:exact;} table{width:100%;border-collapse:collapse;font-size:13px;} th{background:#162216;color:#C4A882;padding:10px;text-align:left;} td{padding:8px;border-bottom:1px solid #3D5C3D;color:#F0EDE8;} span{padding:3px 8px;border-radius:9999px;font-size:11px;font-weight:bold;}</style></head><body>' + content + '</body></html>');
+        w.document.close();
+        w.print();
+    };
+
+    document.getElementById('genPresBtn').addEventListener('click', function() {
+        var slideDisplay  = document.getElementById('slideDisplay');
+        var presContainer = document.getElementById('presContainer');
+        var statusEl      = document.getElementById('presStatus');
+        if (!getKey() || getKey().length < 10) { statusEl.textContent = 'Please enter your Gemini API key.'; return; }
+        var selected = getCheckedDocs();
+        if (selected.length === 0) { statusEl.textContent = 'Please select at least one document from the sidebar.'; return; }
+        var docText = selected.map(function(d) { return 'DOCUMENT: ' + d.name + '\n\n' + d.text; }).join('\n\n').substring(0, 14000);
+        presContainer.style.display = 'block';
+        statusEl.textContent = 'Generating presentation from your document, please wait...';
+        slideDisplay.innerHTML = '<p style="color:#A89880;padding:40px;text-align:center;">Building slides...</p>';
+        var prompt = 'You are a senior HSE presentation expert. Read this document carefully. Create an 8-slide presentation using ONLY content found in this document. Return ONLY a raw JSON array with no markdown and no backticks. Each slide object has exactly these fields: slideNumber (integer), title (string max 8 words), subtitle (string max 15 words), bulletPoints (array of exactly 4 strings max 12 words each), stat1Label (string), stat1Value (string), stat2Label (string), stat2Value (string), color (exactly one of: #C4A882 #4ADE80 #F87171 #60A5FA #FBBF24 #A78BFA #2DD4BF). Document:\n' + docText;
+        callGemini(prompt).then(function(raw) {
+            var clean = stripFences(raw);
+            var match = clean.match(/\[\s*\{[\s\S]*\}\s*\]/);
+            if (match) clean = match[0];
+            window._presSlides = JSON.parse(clean);
+            window._currentSlide = 0;
+            statusEl.textContent = window._presSlides.length + ' slides generated.';
+            document.getElementById('slideCounter').textContent = 'Slide 1 of ' + window._presSlides.length;
+            renderPresSlide(0);
+        }).catch(function(err) {
+            statusEl.textContent = 'Could not generate presentation: ' + err.message;
+            slideDisplay.innerHTML = '<p style="color:#F87171;padding:20px;">Failed. See browser console for details.</p>';
+            console.error(err);
+        });
+    });
+
+    function renderPresSlide(index) {
+        var s = window._presSlides[index];
+        if (!s) return;
+        document.getElementById('slideCounter').textContent = 'Slide ' + (index + 1) + ' of ' + window._presSlides.length;
+        document.getElementById('slideDisplay').innerHTML =
+            '<div style="background:linear-gradient(135deg,#1A2B1A,#243324);min-height:400px;padding:40px;border-radius:16px;font-family:system-ui;">' +
+            '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;">' +
+            '<div style="max-width:60%;"><h2 style="font-size:26px;font-weight:800;color:#F0EDE8;margin:0 0 8px 0;line-height:1.2;">' + s.title + '</h2>' +
+            '<p style="font-size:13px;color:#A89880;margin:0;">' + s.subtitle + '</p></div>' +
+            '<div style="background:rgba(255,255,255,0.05);border-radius:12px;padding:16px;text-align:center;min-width:140px;border:1px solid ' + s.color + '33;">' +
+            '<div style="font-size:28px;font-weight:800;color:' + s.color + ';">' + s.stat1Value + '</div>' +
+            '<div style="font-size:10px;color:#A89880;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">' + s.stat1Label + '</div>' +
+            '<div style="font-size:28px;font-weight:800;color:' + s.color + ';">' + s.stat2Value + '</div>' +
+            '<div style="font-size:10px;color:#A89880;text-transform:uppercase;letter-spacing:1px;">' + s.stat2Label + '</div></div></div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
+            s.bulletPoints.map(function(b) {
+                return '<div style="background:rgba(255,255,255,0.05);border-left:3px solid ' + s.color + ';border-radius:8px;padding:12px 16px;font-size:12px;color:#F0EDE8;line-height:1.5;">' + b + '</div>';
+            }).join('') +
+            '</div>' +
+            '<div style="display:flex;justify-content:space-between;margin-top:20px;border-top:1px solid rgba(255,255,255,0.1);padding-top:12px;">' +
+            '<span style="font-size:10px;color:#A89880;">HSE DocuMind</span>' +
+            '<span style="font-size:10px;color:' + s.color + ';">Slide ' + (index + 1) + ' of ' + window._presSlides.length + '</span></div></div>';
+    }
+
+    document.getElementById('prevSlide').addEventListener('click', function() {
+        if (window._currentSlide > 0) { window._currentSlide--; renderPresSlide(window._currentSlide); }
+    });
+
+    document.getElementById('nextSlide').addEventListener('click', function() {
+        if (window._currentSlide < window._presSlides.length - 1) { window._currentSlide++; renderPresSlide(window._currentSlide); }
+    });
+
+    document.getElementById('dlPresHTML').addEventListener('click', function() {
+        if (!window._presSlides.length) { alert('Generate a presentation first.'); return; }
+        var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>HSE Presentation</title><style>body{margin:0;background:#1A2B1A;font-family:system-ui;}.slide{min-height:100vh;padding:60px;box-sizing:border-box;page-break-after:always;background:linear-gradient(135deg,#1A2B1A,#243324);}</style></head><body>';
+        window._presSlides.forEach(function(s, i) {
+            html += '<div class="slide"><h2 style="font-size:32px;color:#F0EDE8;margin-bottom:8px;">' + s.title + '</h2>';
+            html += '<p style="color:#A89880;margin-bottom:24px;">' + s.subtitle + '</p>';
+            html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">';
+            s.bulletPoints.forEach(function(b) {
+                html += '<div style="background:rgba(255,255,255,0.05);border-left:3px solid ' + s.color + ';padding:16px;border-radius:8px;color:#F0EDE8;font-size:14px;">' + b + '</div>';
+            });
+            html += '</div><p style="color:' + s.color + ';margin-top:32px;font-size:12px;">Slide ' + (i + 1) + ' of ' + window._presSlides.length + ' | HSE DocuMind</p></div>';
+        });
+        html += '</body></html>';
+        var a = document.createElement('a');
+        a.href = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+        a.download = 'HSE-Presentation.html';
+        a.click();
+    });
+
+    document.getElementById('dlPresPDF').addEventListener('click', function() {
+        if (!window._presSlides.length) { alert('Generate a presentation first.'); return; }
+        var w = window.open('', '_blank');
+        var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>HSE Presentation</title><style>body{margin:0;background:#1A2B1A;font-family:system-ui;-webkit-print-color-adjust:exact;print-color-adjust:exact;}.slide{min-height:100vh;padding:60px;box-sizing:border-box;page-break-after:always;background:linear-gradient(135deg,#1A2B1A,#243324);}</style></head><body>';
+        window._presSlides.forEach(function(s, i) {
+            html += '<div class="slide"><h2 style="font-size:32px;color:#F0EDE8;margin-bottom:8px;">' + s.title + '</h2>';
+            html += '<p style="color:#A89880;margin-bottom:24px;">' + s.subtitle + '</p>';
+            html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">';
+            s.bulletPoints.forEach(function(b) {
+                html += '<div style="background:rgba(255,255,255,0.05);border-left:3px solid ' + s.color + ';padding:16px;border-radius:8px;color:#F0EDE8;font-size:14px;">' + b + '</div>';
+            });
+            html += '</div><p style="color:' + s.color + ';margin-top:32px;font-size:12px;">Slide ' + (i + 1) + ' of ' + window._presSlides.length + ' | HSE DocuMind</p></div>';
+        });
+        html += '</body></html>';
+        w.document.write(html);
+        w.document.close();
+        w.print();
+    });
+</script>
+</body>
+</html>
